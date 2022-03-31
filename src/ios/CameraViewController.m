@@ -457,6 +457,21 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         // Succeeded, set input and update connection states
         [self.session addInput:input];
     }
+
+    // set focus params if available to improve focusing
+    NSError* error = nil;
+    AVCaptureDevice *device = [input device];
+    [device lockForConfiguration:&error];
+    if (error == nil) {
+        if ([device isFocusModeSupported:AVCaptureFocusModeContinuousAutoFocus]) {
+            [device setFocusMode:AVCaptureFocusModeContinuousAutoFocus];
+        }
+        if ([device isAutoFocusRangeRestrictionSupported]) {
+            [device setAutoFocusRangeRestriction:AVCaptureAutoFocusRangeRestrictionNear];
+        }
+    }
+    [device unlockForConfiguration];
+
     [self.session commitConfiguration];
 }
 
