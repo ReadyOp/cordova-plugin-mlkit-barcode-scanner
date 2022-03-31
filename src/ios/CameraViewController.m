@@ -24,6 +24,7 @@
 
 @property(nonatomic, weak) IBOutlet UIView *placeHolderView;
 @property(nonatomic, weak) IBOutlet UIView *overlayView;
+@property(nonatomic, strong) UILabel *reticle;
 
 @property(nonatomic, strong) AVCaptureSession *session;
 @property(nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
@@ -108,6 +109,28 @@
     self.barcodeDetector = [MLKBarcodeScanner barcodeScannerWithOptions:options];
 }
 
+-(UIImageOrientation)imageOrientationFromDeviceOrientation:(UIDeviceOrientation)deviceOrientation cameraPosition:(AVCaptureDevicePosition)cameraPosition {
+  switch (deviceOrientation) {
+    case UIDeviceOrientationPortrait:
+      return cameraPosition == AVCaptureDevicePositionFront ? UIImageOrientationLeftMirrored
+                                                            : UIImageOrientationRight;
+
+    case UIDeviceOrientationLandscapeLeft:
+      return cameraPosition == AVCaptureDevicePositionFront ? UIImageOrientationDownMirrored
+                                                            : UIImageOrientationUp;
+    case UIDeviceOrientationPortraitUpsideDown:
+      return cameraPosition == AVCaptureDevicePositionFront ? UIImageOrientationRightMirrored
+                                                            : UIImageOrientationLeft;
+    case UIDeviceOrientationLandscapeRight:
+      return cameraPosition == AVCaptureDevicePositionFront ? UIImageOrientationUpMirrored
+                                                            : UIImageOrientationDown;
+    case UIDeviceOrientationUnknown:
+    case UIDeviceOrientationFaceUp:
+    case UIDeviceOrientationFaceDown:
+      return UIImageOrientationUp;
+  }
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
@@ -153,63 +176,60 @@
     [self.session stopRunning];
 }
 
+
 #pragma mark - AVCaptureVideoDataOutputSampleBufferDelegate
+
+- (CGRect)convertRectOfInterest: (CGRect)rect
+{
+    CGRect overlayRect = self.view.bounds;
+    CGSize overlaySize = overlayRect.size;
+
+    CGFloat x = 1 / (overlaySize.width / rect.origin.x);
+    CGFloat y = 1 / (overlaySize.height / rect.origin.y);
+    CGFloat w = 1 / (overlaySize.width / rect.size.width);
+    CGFloat h = 1 / (overlaySize.height / rect.size.height);
+
+    return CGRectMake(x, y, w, h);
+}
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection *)connection {
 
+    // Figure out the image orientation
+    AVCaptureDevice *device = [[[self.session inputs] firstObject] device];
+    AVCaptureDevicePosition cameraPosition = [device position];
+    UIImageOrientation orientation = [self imageOrientationFromDeviceOrientation: UIDevice.currentDevice.orientation cameraPosition: cameraPosition];
+
+    // Get the raw image buffer and it's dimensions
+    CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    CGFloat imageWidth = CVPixelBufferGetWidth(imageBuffer);
+    CGFloat imageHeight = CVPixelBufferGetHeight(imageBuffer);
+
+    // Configure the crop rectangle, we crop the image to only what's within the reticle view, for faster processing
+    CGRect interest = [self convertRectOfInterest: self.reticle.frame];
+    CGRect cropRect;
+    if (orientation == UIImageOrientationRight || orientation == UIImageOrientationRightMirrored || orientation == UIImageOrientationLeft || orientation == UIImageOrientationLeftMirrored) {
+        cropRect = CGRectMake(imageWidth * interest.origin.y, imageHeight * interest.origin.x, imageWidth * interest.size.height, imageHeight * interest.size.width);
+    } else {
+        cropRect = CGRectMake(imageWidth * interest.origin.x, imageHeight * interest.origin.y, imageWidth * interest.size.width, imageHeight * interest.size.height);
+    }
+
     //Convert sampleBuffer into an image.
     //MLKVisionImage *image = [[MLKVisionImage alloc] initWithBuffer:sampleBuffer];
-    CVImageBufferRef imageBuffer =
-    CMSampleBufferGetImageBuffer(sampleBuffer);
     CIImage *ciImage = [CIImage imageWithCVPixelBuffer:imageBuffer];
     CIContext *temporaryContext = [CIContext contextWithOptions:nil];
-    CGImageRef videoImage = [temporaryContext
-                             createCGImage:ciImage
-                             fromRect:CGRectMake(0, 0,
-                                                 CVPixelBufferGetWidth(imageBuffer),
-                                                 CVPixelBufferGetHeight(imageBuffer))];
+    CGImageRef videoImage = [temporaryContext createCGImage:ciImage fromRect: cropRect];
 
     UIImage *image = [[UIImage alloc] initWithCGImage:videoImage];
     CGImageRelease(videoImage);
 
-    //We're going to crop UIImage to the onscreen viewfinder's box size for faster processing.
-    UIImage *croppedImg = nil;
-
-    //Define the crop coordinates.
-    CGRect screenRect = [[UIScreen mainScreen] bounds];
-    CGFloat screenWidth = screenRect.size.width;
-    CGFloat screenHeight = screenRect.size.height;
-    
-    CGFloat imageWidth = image.size.width;
-    CGFloat imageHeight = image.size.height;
-    
-    CGFloat actualFrameWidth = 0;
-    CGFloat actualFrameHeight = 0;
-    
-    //Figure out which ratio is bigger and then subtract a value off the frame width in case some of the camera preview is hanging off screen.
-    if(imageWidth/screenWidth < imageHeight/screenHeight){
-        actualFrameWidth = imageWidth * _detectorSize;
-        actualFrameHeight = actualFrameWidth;
-    } else {
-        actualFrameHeight = imageHeight * _detectorSize;
-        actualFrameWidth = actualFrameHeight;
-    }
-
-    //Define crop rectangle.
-    CGRect cropRect = CGRectMake(imageWidth/2 - actualFrameWidth/2, imageHeight/2 - actualFrameHeight/2, actualFrameWidth, actualFrameHeight);
-
-    //Crop image
-    croppedImg = [self croppIngimageByImageName:image toRect:cropRect];
-
-    //Rotate the image.
-    MLKVisionImage *portraitImage = [[MLKVisionImage alloc] initWithImage:croppedImg];
-    portraitImage.orientation = UIImageOrientationRight;
+    // Setup the image for the MLK
+    MLKVisionImage *visionImage = [[MLKVisionImage alloc] initWithImage:image];
+    visionImage.orientation = orientation;
 
     //Send the image through the barcode reader.
-    [self.barcodeDetector processImage:portraitImage completion:^(NSArray<MLKBarcode *> *barcodes,
-                                                          NSError *error) {
+    [self.barcodeDetector processImage: visionImage completion:^(NSArray<MLKBarcode *> *barcodes, NSError *error) {
         if (error != nil) {
             return;
         } else if (barcodes != nil) {
@@ -270,18 +290,18 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     CGFloat screenWidth = screenRect.size.width;
     CGFloat screenHeight = screenRect.size.height;
 
-    CGFloat frameWidth = screenWidth*_detectorSize;
+    CGFloat frameWidth = screenWidth * _detectorSize;
     CGFloat frameHeight = frameWidth;
 
-    UILabel* _label1 = [[UILabel alloc] init];
-    _label1.frame = CGRectMake(screenWidth/2 - frameWidth/2, screenHeight/2 - frameHeight/2, frameWidth, frameHeight);
-    _label1.layer.masksToBounds = NO;
-    _label1.layer.cornerRadius = 30;
-    _label1.userInteractionEnabled = YES;
-    _label1.layer.borderColor = [UIColor whiteColor].CGColor;
-    _label1.layer.borderWidth = 3.0;
-    UITapGestureRecognizer* tapScanner = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(focusAtPoint:)];
-    [_label1 addGestureRecognizer:tapScanner];
+    self.reticle = [[UILabel alloc] init];
+    self.reticle.frame = CGRectMake(screenWidth/2 - frameWidth/2, screenHeight/2 - frameHeight/2, frameWidth, frameHeight);
+    self.reticle.layer.masksToBounds = NO;
+    self.reticle.layer.cornerRadius = 30;
+    self.reticle.userInteractionEnabled = YES;
+    self.reticle.layer.borderColor = [UIColor whiteColor].CGColor;
+    self.reticle.layer.borderWidth = 3.0;
+    UITapGestureRecognizer *tapScanner = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(focusAtPoint:)];
+    [self.reticle addGestureRecognizer:tapScanner];
 
     CGFloat buttonSize = 45.0;
 
@@ -380,40 +400,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
         }
     }
-}
-static inline double radians (double degrees) {return degrees * M_PI/180;}
-- (UIImage*) rotateImage:(UIImage*)src toOrientation:(UIImageOrientation) orientation
-{
-    UIGraphicsBeginImageContext(src.size);
-
-    CGContextRef context = UIGraphicsGetCurrentContext();
-
-    if (orientation == UIImageOrientationRight) {
-        CGContextRotateCTM (context, radians(90));
-    } else if (orientation == UIImageOrientationLeft) {
-        CGContextRotateCTM (context, radians(-90));
-    } else if (orientation == UIImageOrientationDown) {
-        // NOTHING
-    } else if (orientation == UIImageOrientationUp) {
-        CGContextRotateCTM (context, radians(90));
-    }
-
-    [src drawAtPoint:CGPointMake(0, 0)];
-
-    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-    return image;
-}
-
-- (UIImage *)croppIngimageByImageName:(UIImage *)imageToCrop toRect:(CGRect)rect
-{
-    //CGRect CropRect = CGRectMake(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height+15);
-
-    CGImageRef imageRef = CGImageCreateWithImageInRect([imageToCrop CGImage], rect);
-    UIImage *cropped = [UIImage imageWithCGImage:imageRef];
-    CGImageRelease(imageRef);
-
-    return cropped;
 }
 
 - (void) toggleFlashlight:(id)sender
