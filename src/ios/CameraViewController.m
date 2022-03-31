@@ -24,7 +24,6 @@
 
 @property(nonatomic, weak) IBOutlet UIView *placeHolderView;
 @property(nonatomic, weak) IBOutlet UIView *overlayView;
-@property(nonatomic, strong) UIImageView *imageView;
 
 @property(nonatomic, strong) AVCaptureSession *session;
 @property(nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
@@ -328,20 +327,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
     [self.view addSubview:self.torchButton];
 
-    [self.view addSubview:_label1];
-
-    self.imageView = [[UIImageView alloc] initWithImage:nil];
-
-    UIView *catView = [[UIView alloc] initWithFrame:CGRectMake(0,0,frameWidth,frameHeight)];
-    self.imageView.frame = catView.bounds;
-
-    // add the imageview to the superview
-    [catView addSubview:self.imageView];
-
-    //add the view to the main view
-
-    [self.view addSubview:catView];
-
+    [self.view addSubview:self.reticle];
 }
 
 #pragma mark - Helper Functions
