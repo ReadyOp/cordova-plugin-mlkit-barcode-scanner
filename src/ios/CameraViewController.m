@@ -295,7 +295,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     CGFloat screenOffset = (screenWidth/2 - frameWidth/2)/2 - buttonSize/2;
     NSLog(@"screenOffset %f", screenOffset);
 
-    _cancelButton.frame = CGRectMake(screenOffset, screenHeight-screenOffset-buttonSize, buttonSize, buttonSize);
+    _cancelButton.frame = CGRectMake(buttonSize / 2, screenHeight - buttonSize - (buttonSize / 2), buttonSize, buttonSize);
     _cancelButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.4];
     _cancelButton.transform=CGAffineTransformMakeRotation(M_PI / 2);
     _cancelButton.layer.cornerRadius = buttonSize/2;
@@ -319,7 +319,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     [self.torchButton setImage:torchIcon
                       forState:UIControlStateNormal];
 
-    self.torchButton.frame = CGRectMake(screenWidth-screenOffset-buttonSize, screenHeight-screenOffset-buttonSize, buttonSize, buttonSize);
+    self.torchButton.frame = CGRectMake(screenWidth - buttonSize - (buttonSize / 2), screenHeight - buttonSize - (buttonSize / 2), buttonSize, buttonSize);
     self.torchButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.4];
     self.torchButton.transform=CGAffineTransformMakeRotation(M_PI / 2);
     self.torchButton.layer.cornerRadius = buttonSize/2;
