@@ -68,10 +68,16 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
+
     // Set up camera.
     self.session = [[AVCaptureSession alloc] init];
-    self.session.sessionPreset = AVCaptureSessionPresetHigh;
+    if ([self.session canSetSessionPreset:AVCaptureSessionPreset3840x2160]) {
+        self.session.sessionPreset = AVCaptureSessionPreset3840x2160;
+    } else if ([self.session canSetSessionPreset:AVCaptureSessionPresetHigh]) {
+        self.session.sessionPreset = AVCaptureSessionPresetHigh;
+    } else if ([self.session canSetSessionPreset:AVCaptureSessionPresetMedium]) {
+        self.session.sessionPreset = AVCaptureSessionPresetMedium;
+    }
 
     _videoDataOutputQueue = dispatch_queue_create("VideoDataOutputQueue",
                                                   DISPATCH_QUEUE_SERIAL);
