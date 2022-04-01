@@ -14,6 +14,7 @@ import android.graphics.PorterDuff;
 import android.graphics.RectF;
 import android.os.Bundle;
 
+import android.util.Size;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -305,9 +306,11 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
 
     preview.setSurfaceProvider(mCameraView.createSurfaceProvider());
 
-    ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).setTargetAspectRatio(AspectRatio.RATIO_16_9)
-        .build();
+    ImageAnalysis.Builder builder = new ImageAnalysis.Builder();
+    builder.setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST);
+    builder.setTargetResolution(new Size(mCameraView.getWidth(), mCameraView.getHeight()));
+
+    ImageAnalysis imageAnalysis = builder.build();
 
     BarcodeScanner scanner = BarcodeScanning
         .getClient(new BarcodeScannerOptions.Builder().setBarcodeFormats(barcodeFormat).build());
