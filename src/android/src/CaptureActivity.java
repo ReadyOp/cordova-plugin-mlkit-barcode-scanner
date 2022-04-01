@@ -26,11 +26,9 @@ import android.widget.ImageButton;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.camera.core.AspectRatio;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -40,9 +38,6 @@ import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.LiveData;
 
 import com.google.android.gms.common.api.CommonStatusCodes;
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.OnFailureListener;
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -55,6 +50,7 @@ import com.mobisys.cordova.plugins.mlkit.barcode.scanner.utils.BitmapUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -69,12 +65,10 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
   public static final String BarcodeValue = "MLKitBarcodeValue";
 
   private ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
-  private ExecutorService executor = Executors.newSingleThreadExecutor();
+  private final ExecutorService executor = Executors.newSingleThreadExecutor();
   private PreviewView mCameraView;
   private SurfaceHolder holder;
   private SurfaceView surfaceView;
-  private Canvas canvas;
-  private Paint paint;
 
   private static final int RC_HANDLE_CAMERA_PERM = 2;
   private ImageButton _TorchButton;
@@ -118,19 +112,16 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
 
     _TorchButton = findViewById(getResources().getIdentifier("torch_button", "id", this.getPackageName()));
 
-    _TorchButton.setOnClickListener(new View.OnClickListener() {
-      @Override
-      public void onClick(View v) {
+    _TorchButton.setOnClickListener(v -> {
 
-        LiveData<Integer> flashState = camera.getCameraInfo().getTorchState();
-        if (flashState.getValue() != null) {
-          boolean state = flashState.getValue() == 1;
-          _TorchButton.setBackgroundResource(getResources().getIdentifier(!state ? "torch_active" : "torch_inactive",
-              "drawable", CaptureActivity.this.getPackageName()));
-          camera.getCameraControl().enableTorch(!state);
-        }
-
+      LiveData<Integer> flashState = camera.getCameraInfo().getTorchState();
+      if (flashState.getValue() != null) {
+        boolean state = flashState.getValue() == 1;
+        _TorchButton.setBackgroundResource(getResources().getIdentifier(!state ? "torch_active" : "torch_inactive",
+            "drawable", CaptureActivity.this.getPackageName()));
+        camera.getCameraControl().enableTorch(!state);
       }
+
     });
 
   }
@@ -138,7 +129,7 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
   // ----------------------------------------------------------------------------
   // | Helper classes
   // ----------------------------------------------------------------------------
-  private class CaptureGestureListener extends GestureDetector.SimpleOnGestureListener {
+  private static class CaptureGestureListener extends GestureDetector.SimpleOnGestureListener {
     @Override
     public boolean onSingleTapConfirmed(MotionEvent e) {
       return super.onSingleTapConfirmed(e);
@@ -160,7 +151,8 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
     public void onScaleEnd(ScaleGestureDetector detector) {
 
       if (camera != null) {
-        float scale = camera.getCameraInfo().getZoomState().getValue().getZoomRatio() * detector.getScaleFactor();
+        float ratio = Objects.requireNonNull(camera.getCameraInfo().getZoomState().getValue()).getZoomRatio();
+        float scale = ratio * detector.getScaleFactor();
         camera.getCameraControl().setZoomRatio(scale);
       }
     }
@@ -181,12 +173,8 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
       return;
     }
 
-    View.OnClickListener listener = new View.OnClickListener() {
-      @Override
-      public void onClick(View view) {
-        ActivityCompat.requestPermissions(CaptureActivity.this, permissions, RC_HANDLE_CAMERA_PERM);
-      }
-    };
+    View.OnClickListener listener = view -> ActivityCompat.requestPermissions(CaptureActivity.this, permissions,
+        RC_HANDLE_CAMERA_PERM);
 
     findViewById(getResources().getIdentifier("topLayout", "id", getPackageName())).setOnClickListener(listener);
     Snackbar
@@ -209,11 +197,7 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
       return;
     }
 
-    DialogInterface.OnClickListener listener = new DialogInterface.OnClickListener() {
-      public void onClick(DialogInterface dialog, int id) {
-        finish();
-      }
-    };
+    DialogInterface.OnClickListener listener = (dialog, id) -> finish();
 
     AlertDialog.Builder builder = new AlertDialog.Builder(this);
     builder.setTitle("Camera permission required")
@@ -260,7 +244,7 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
     mCameraView = findViewById(getResources().getIdentifier("previewView", "id", getPackageName()));
     mCameraView.setPreferredImplementationMode(PreviewView.ImplementationMode.TEXTURE_VIEW);
 
-    Boolean rotateCamera = getIntent().getBooleanExtra("RotateCamera", false);
+    boolean rotateCamera = getIntent().getBooleanExtra("RotateCamera", false);
     if (rotateCamera) {
       mCameraView.setScaleX(-1F);
       mCameraView.setScaleY(-1F);
@@ -272,17 +256,14 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
     // mCameraView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
 
     cameraProviderFuture = ProcessCameraProvider.getInstance(this);
-    cameraProviderFuture.addListener(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
-          CaptureActivity.this.bindPreview(cameraProvider);
+    cameraProviderFuture.addListener(() -> {
+      try {
+        ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+        CaptureActivity.this.bindPreview(cameraProvider);
 
-        } catch (ExecutionException | InterruptedException e) {
-          // No errors need to be handled for this Future.
-          // This should never be reached.
-        }
+      } catch (ExecutionException | InterruptedException e) {
+        // No errors need to be handled for this Future.
+        // This should never be reached.
       }
     }, ContextCompat.getMainExecutor(this));
   }
@@ -290,6 +271,7 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
   /**
    * Binding to camera
    */
+  @SuppressLint("UnsafeOptInUsageError")
   private void bindPreview(ProcessCameraProvider cameraProvider) {
 
     int barcodeFormat;
@@ -315,88 +297,69 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
     BarcodeScanner scanner = BarcodeScanning
         .getClient(new BarcodeScannerOptions.Builder().setBarcodeFormats(barcodeFormat).build());
 
-    imageAnalysis.setAnalyzer(executor, new ImageAnalysis.Analyzer() {
-      @SuppressLint("UnsafeExperimentalUsageError")
-      @Override
-      public void analyze(@NonNull ImageProxy image) {
-
-        if (image == null || image.getImage() == null) {
-          return;
-        }
-
-        Bitmap bmp = BitmapUtils.getBitmap(image);
-
-        int height = bmp.getHeight();
-        int width = bmp.getWidth();
-
-        int left, right, top, bottom, diameter, boxHeight, boxWidth;
-
-        diameter = width;
-        if (height < width) {
-          diameter = height;
-        }
-
-        int offset = (int) ((1 - DetectorSize) * diameter);
-        diameter -= offset;
-
-        left = width / 2 - diameter / 2;
-        top = height / 2 - diameter / 2;
-        right = width / 2 + diameter / 2;
-        bottom = height / 2 + diameter / 2;
-
-        boxHeight = bottom - top;
-        boxWidth = right - left;
-
-        Bitmap bitmap = Bitmap.createBitmap(bmp, left, top, boxWidth, boxHeight);
-        scanner.process(InputImage.fromBitmap(bitmap, image.getImageInfo().getRotationDegrees()))
-            .addOnSuccessListener(new OnSuccessListener<List<Barcode>>() {
-              @Override
-              public void onSuccess(List<Barcode> barCodes) {
-
-                // # Code to test image viewfinder
-                /*
-                 * ImageView imageView = (ImageView)
-                 * findViewById(getResources().getIdentifier("imageView", "id",
-                 * getPackageName())); imageView.setImageBitmap(bitmap);
-                 */
-
-                if (barCodes.size() > 0) {
-                  for (Barcode barcode : barCodes) {
-                    // Toast.makeText(CaptureActivity.this, "FOUND: " + barcode.getDisplayValue(),
-                    // Toast.LENGTH_SHORT).show();
-                    Intent data = new Intent();
-                    String value = barcode.getRawValue();
-
-                    // rawValue returns null if string is not UTF-8 encoded.
-                    // If that's the case, we will decode it as ASCII,
-                    // because it's the most common encoding for barcodes.
-                    // e.g. https://www.barcodefaq.com/1d/code-128/
-                    if (barcode.getRawValue() == null) {
-                      value = new String(barcode.getRawBytes(), StandardCharsets.US_ASCII);
-                    }
-
-                    data.putExtra(BarcodeFormat, barcode.getFormat());
-                    data.putExtra(BarcodeType, barcode.getValueType());
-                    data.putExtra(BarcodeValue, value);
-                    setResult(CommonStatusCodes.SUCCESS, data);
-                    finish();
-
-                  }
-                }
-              }
-            }).addOnFailureListener(new OnFailureListener() {
-              @Override
-              public void onFailure(@NonNull Exception e) {
-
-              }
-            }).addOnCompleteListener(new OnCompleteListener<List<Barcode>>() {
-              @Override
-              public void onComplete(@NonNull Task<List<Barcode>> task) {
-                image.close();
-              }
-            });
+    imageAnalysis.setAnalyzer(executor, image -> {
+      if (image.getImage() == null) {
+        return;
+      }
+      Bitmap bmp = BitmapUtils.getBitmap(image);
+      if (bmp == null) {
+        return;
       }
 
+      int height = bmp.getHeight();
+      int width = bmp.getWidth();
+
+      int left, right, top, bottom, boxHeight, boxWidth;
+      int diameter = Math.min(height, width);
+
+      int offset = (int) ((1 - DetectorSize) * diameter);
+      diameter -= offset;
+
+      left = width / 2 - diameter / 2;
+      top = height / 2 - diameter / 2;
+      right = width / 2 + diameter / 2;
+      bottom = height / 2 + diameter / 2;
+
+      boxHeight = bottom - top;
+      boxWidth = right - left;
+
+      Bitmap bitmap = Bitmap.createBitmap(bmp, left, top, boxWidth, boxHeight);
+      Task<List<Barcode>> task = scanner
+          .process(InputImage.fromBitmap(bitmap, image.getImageInfo().getRotationDegrees()));
+      task.addOnSuccessListener(barCodes -> {
+        // # Code to test image viewfinder
+        /*
+         * ImageView imageView = (ImageView)
+         * findViewById(getResources().getIdentifier("imageView", "id",
+         * getPackageName())); imageView.setImageBitmap(bitmap);
+         */
+        if (barCodes.size() > 0) {
+          for (Barcode barcode : barCodes) {
+            // Toast.makeText(CaptureActivity.this, "FOUND: " + barcode.getDisplayValue(),
+            // Toast.LENGTH_SHORT).show();
+            Intent data = new Intent();
+            String value = barcode.getRawValue();
+
+            // rawValue returns null if string is not UTF-8 encoded.
+            // If that's the case, we will decode it as ASCII,
+            // because it's the most common encoding for barcodes.
+            // e.g. https://www.barcodefaq.com/1d/code-128/
+            if (barcode.getRawValue() == null) {
+              value = new String(barcode.getRawBytes(), StandardCharsets.US_ASCII);
+            }
+
+            data.putExtra(BarcodeFormat, barcode.getFormat());
+            data.putExtra(BarcodeType, barcode.getValueType());
+            data.putExtra(BarcodeValue, value);
+            setResult(CommonStatusCodes.SUCCESS, data);
+            finish();
+
+          }
+        }
+      });
+      task.addOnFailureListener(e -> {
+      });
+      task.addOnCompleteListener(r -> image.close());
     });
 
     camera = cameraProvider.bindToLifecycle((LifecycleOwner) this, cameraSelector, imageAnalysis, preview);
@@ -411,20 +374,16 @@ public class CaptureActivity extends AppCompatActivity implements SurfaceHolder.
       int height = mCameraView.getHeight();
       int width = mCameraView.getWidth();
 
-      int left, right, top, bottom, diameter;
-
-      diameter = width;
-      if (height < width) {
-        diameter = height;
-      }
+      int left, right, top, bottom;
+      int diameter = Math.min(height, width);
 
       int offset = (int) ((1 - DetectorSize) * diameter);
       diameter -= offset;
 
-      canvas = holder.lockCanvas();
+      Canvas canvas = holder.lockCanvas();
       canvas.drawColor(0, PorterDuff.Mode.CLEAR);
       // border's properties
-      paint = new Paint();
+      Paint paint = new Paint();
       paint.setStyle(Paint.Style.STROKE);
       paint.setColor(color);
       paint.setStrokeWidth(5);
