@@ -25,6 +25,8 @@
 @property(nonatomic, weak) IBOutlet UIView *placeHolderView;
 @property(nonatomic, weak) IBOutlet UIView *overlayView;
 @property(nonatomic, strong) UILabel *reticle;
+@property(nonatomic) CGRect rectReticle;
+@property(nonatomic) CGRect rectPreview;
 
 @property(nonatomic, strong) AVCaptureSession *session;
 @property(nonatomic, strong) AVCaptureVideoDataOutput *videoDataOutput;
@@ -145,11 +147,11 @@
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    
+
     AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
     if (authStatus == AVAuthorizationStatusDenied) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Camera permission required" message:@"Access to the camera has been prohibited, please enable it in the settings to continue." preferredStyle:UIAlertControllerStyleAlert];
-        
+
         UIAlertAction *primaryAction = [UIAlertAction actionWithTitle:@"Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [[UIApplication sharedApplication] openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString] options:@{} completionHandler:nil];
             [self.delegate closeScanner];
@@ -166,7 +168,7 @@
         [[UIDevice currentDevice] setValue:
          [NSNumber numberWithInteger: UIInterfaceOrientationPortrait]
                                     forKey:@"orientation"];
-        
+
         [self.session startRunning];
     }
 }
@@ -181,7 +183,7 @@
 
 - (CGRect)convertRectOfInterest: (CGRect)rect
 {
-    CGRect overlayRect = self.view.bounds;
+    CGRect overlayRect = self.rectPreview;
     CGSize overlaySize = overlayRect.size;
 
     CGFloat x = 1 / (overlaySize.width / rect.origin.x);
@@ -190,6 +192,15 @@
     CGFloat h = 1 / (overlaySize.height / rect.size.height);
 
     return CGRectMake(x, y, w, h);
+}
+
+- (UIImage *)croppIngimageByImageName:(UIImage *)imageToCrop toRect:(CGRect)rect
+{
+    CGImageRef imageRef = CGImageCreateWithImageInRect([imageToCrop CGImage], rect);
+    UIImage *cropped = [UIImage imageWithCGImage:imageRef];
+    CGImageRelease(imageRef);
+
+    return cropped;
 }
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
@@ -207,7 +218,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     CGFloat imageHeight = CVPixelBufferGetHeight(imageBuffer);
 
     // Configure the crop rectangle, we crop the image to only what's within the reticle view, for faster processing
-    CGRect interest = [self convertRectOfInterest: self.reticle.frame];
+    CGRect interest = [self convertRectOfInterest: self.rectReticle];
     CGRect cropRect;
     if (orientation == UIImageOrientationRight || orientation == UIImageOrientationRightMirrored || orientation == UIImageOrientationLeft || orientation == UIImageOrientationLeftMirrored) {
         cropRect = CGRectMake(imageWidth * interest.origin.y, imageHeight * interest.origin.x, imageWidth * interest.size.height, imageHeight * interest.size.width);
@@ -215,17 +226,18 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         cropRect = CGRectMake(imageWidth * interest.origin.x, imageHeight * interest.origin.y, imageWidth * interest.size.width, imageHeight * interest.size.height);
     }
 
-    //Convert sampleBuffer into an image.
-    //MLKVisionImage *image = [[MLKVisionImage alloc] initWithBuffer:sampleBuffer];
-    CIImage *ciImage = [CIImage imageWithCVPixelBuffer:imageBuffer];
-    CIContext *temporaryContext = [CIContext contextWithOptions:nil];
-    CGImageRef videoImage = [temporaryContext createCGImage:ciImage fromRect: cropRect];
-
-    UIImage *image = [[UIImage alloc] initWithCGImage:videoImage];
+    // Convert sampleBuffer into an image
+    CIImage *ciImage = [CIImage imageWithCVPixelBuffer: imageBuffer];
+    CIContext *temporaryContext = [CIContext contextWithOptions: nil];
+    CGImageRef videoImage = [temporaryContext createCGImage:ciImage fromRect: CGRectMake(0, 0, imageWidth, imageHeight)];
+    UIImage *image = [[UIImage alloc] initWithCGImage: videoImage];
     CGImageRelease(videoImage);
 
+    // Cropping the image /w the createCGImage above causes a memory leak, so we crop it separately.
+    UIImage *croppedImg = [self croppIngimageByImageName: image toRect:cropRect];
+
     // Setup the image for the MLK
-    MLKVisionImage *visionImage = [[MLKVisionImage alloc] initWithImage:image];
+    MLKVisionImage *visionImage = [[MLKVisionImage alloc] initWithImage: croppedImg];
     visionImage.orientation = orientation;
 
     //Send the image through the barcode reader.
@@ -242,7 +254,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
         }
     }];
-
 }
 
 #pragma mark - Camera setup
@@ -329,9 +340,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
     [self.view addSubview:_cancelButton];
 
-
-
-
     self.torchButton = [[UIButton alloc] init];
     [self.torchButton addTarget:self
                          action:@selector(toggleFlashlight:)
@@ -354,6 +362,10 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     [self.view addSubview:self.torchButton];
 
     [self.view addSubview:self.reticle];
+
+    // Save the rects for both the reticle and superview, they're needed to crop image samples for the barcode scanner
+    self.rectPreview = self.view.bounds;
+    self.rectReticle = self.reticle.frame;
 }
 
 #pragma mark - Helper Functions
